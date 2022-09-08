@@ -1,12 +1,11 @@
 import asyncio
 
-
 port = 9001
 
 # this program recieves messages, main.py sends them
 
 async def handle(reader, writer):
-    data = await reader.read(100)
+    data = await reader.read()
     message = data.decode()
     sender = writer.get_extra_info("peername")
     print(message)

@@ -1,7 +1,6 @@
 import asyncio
 import reciever
 
-
 # this program sends messages, reciever.py recieves them.
 
 friend = input("Enter IP: ")
