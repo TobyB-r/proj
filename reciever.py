@@ -12,9 +12,11 @@ async def handle(reader, writer):
     print(message)
     print(sender)
 
-async def main():
+async def serve():
     async with await asyncio.start_server(handle, port=9001) as server:
         print("listening on port {}".format(port))
         await server.serve_forever()
 
-asyncio.run(main())
+
+if __name__ == "__main__":
+    asyncio.run(serve())
