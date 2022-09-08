@@ -1,5 +1,8 @@
 import asyncio
 
+
+port = 9001
+
 # this program recieves messages, main.py sends them
 
 async def handle(reader, writer):
@@ -11,6 +14,7 @@ async def handle(reader, writer):
 
 async def main():
     async with await asyncio.start_server(handle, port=9001) as server:
+        print("listening on port {}".format(port))
         await server.serve_forever()
 
 asyncio.run(main())
