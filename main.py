@@ -4,7 +4,7 @@ import asyncio
 
 friend = input("Enter IP: ")
 
-async def start_client(message):
+async def start_client():
     _, writer = await asyncio.open_connection(friend, 123)
 
     message = input("Send message: ").encode()
@@ -12,4 +12,4 @@ async def start_client(message):
     
     await writer.drain()
 
-asyncio.run(start_client('Hello World!'))
+asyncio.run(start_client())
