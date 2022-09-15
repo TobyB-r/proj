@@ -10,7 +10,6 @@ class Client(Tk):
         self.ip = ip
         self.port = port
         self.nextmsg = StringVar(self)
-        self.history = StringVar(self)
         self.peer = ""
         self.server = None
     
@@ -27,6 +26,8 @@ class Client(Tk):
 
     # begin the program
     async def start_loop(self):
+        # self.ip = ip
+
         # the queue is initiated here after asyncio.run() has been called
         # queues made in __init__ attach to another event loop and don't work
         self.msg_queue = asyncio.Queue()
@@ -64,24 +65,18 @@ class Client(Tk):
             self.writer.write(msg.encode())
             await self.writer.drain()
             
-            history = self.history.get()
-
-            self.history.set(
-                history + "\n"
-                + "You sent: " + msg
-            )
+            self.history.configure(state="normal")
+            self.history.insert( "end", "\nYou sent: " + msg)
+            self.history.configure(state="disabled")
     
     async def listen(self):
         while True:
             msg = await self.reader.read(100)
 
             if msg:
-                history = self.history.get()
-
-                self.history.set(
-                    history + "\n"
-                    + self.peer + " sent: " + msg.decode()
-                )
+                self.history.configure(state="normal")
+                self.history.insert("end", "\n" + self.peer + " sent: " + msg.decode())
+                self.history.configure(state="disabled")
             
             await asyncio.sleep(1)
 
