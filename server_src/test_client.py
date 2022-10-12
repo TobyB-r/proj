@@ -2,8 +2,8 @@ import asyncio
 import json
 
 ip = input("Enter IP:")
-identity = "jimmy"
-recipient = "bob"
+identity = "unit1"
+recipient = "unit2"
 msg = "I'm stuff :)"
 
 async def main():
