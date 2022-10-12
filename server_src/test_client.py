@@ -2,17 +2,29 @@ import asyncio
 import json
 
 ip = input("Enter IP:")
-identity = "unit1"
-recipient = "unit2"
+port = 9001
+identity = "windows"
+recipient = "linux"
 msg = "I'm stuff :)"
 
 async def main():
-    reader, writer = await asyncio.open_connection(ip)
+    reader, writer = await asyncio.open_connection(ip, port=port)
 
-    serialized = json.dumps({"sender": identity, "recipient": recipient, "message": msg})
-    print(serialized)
+    # handshake
+    handshake = json.dumps({"identity": identity})
+    writer.write(handshake.encode("ascii"))
+    # writer.write(b"\n")
+    await writer.drain()
 
-    writer.write(serialized)
-    writer.write("\n")
+    # serialized = json.dumps({"sender": identity, "recipient": recipient, "message": msg})
+    # print(serialized)
+
+    while True:
+        line = await reader.readline()
+        
+        if not line:
+            break
+        
+        print(line)
 
 asyncio.run(main())

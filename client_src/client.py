@@ -79,14 +79,13 @@ class Client(Tk):
     # periodically checks if a message has been recieved
     async def listen(self):
         while True:
+            print("listen")
             msg = await self.reader.read(100)
 
             if msg:
                 self.history.configure(state="normal")
                 self.history.insert("end", "\n" + self.peer + " sent: " + msg.decode())
                 self.history.configure(state="disabled")
-            
-            await asyncio.sleep(1)
 
     # replacement for Tk.mainloop()
     async def updater(self):
