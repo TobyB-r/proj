@@ -1,51 +1,57 @@
 import asyncio
 import json
 
-# demo for how the server will work
-# when clients connect they give their identity
-# if identity isn't already in the list it is added
-# messages say what client they are meant for
-# if that client is online then the server relays the message
-# otherwise the messages is stored for when the client comes back
-# communication over network is serialized
-
 port = 9001
-
-unsent = {}
 connected = {}
+read_lock = asyncio.Lock()
+read_queue = asyncio.Queue()
 
 async def callback(reader, writer):
-    handshake = json.loads(await reader.readline())
+    text = await reader.readline()
+    handshake = json.loads(text)
     identity = handshake["identity"]
     connected[identity] = (reader, writer)
+
+    read_queue.put_nowait(asyncio.create_task(reader.readline(), name=identity))
+
+async def client_loop():
+    pending = set()
     
-    # if identity not in unsent:
-    #     unsent[identity] = []
-    # elif len(unsent[identity]):
-    #     for msg in unsent[identity]:
-    #         writer.write(msg)
-    #         writer.write(b"\n")
-    #         await writer.drain()
+    while True:
+        while not read_queue.empty():
+            pending.add(read_queue.get_nowait())
+        
+        if not pending:
+            pending = {await read_queue.get()}
+        
+        done, pending = await asyncio.wait(pending,
+            return_when=asyncio.FIRST_COMPLETED, timeout=0.5)
 
-    try:
-        while True:
-            line = json.loads(await reader.readline())
-            recipient = line["recipient"]
+        if done:
+            try:
+                winner = list(done)[0]
+                
+                if winner.exception():
+                    raise winner.exception()
+                
+                message = winner.result()
 
-            if recipient in connected:
-                reader, writer = recipient[connected]
-                writer.write(line)
-                writer.write(b"\n")
-            # elif recipient in unsent:
-            #     unsent[recipient].append(line)
-            # else:
-            #     unsent[recipient] = [line]
-    except ConnectionError:
-        del connected[identity]
-        # del unsent[identity]
+                if message != b"":
+                    line = json.loads(message)
+                    recipient = line["recipient"]
+
+                    if recipient in connected:
+                        _, writer = connected[recipient]
+                        writer.write(message)
+                        await writer.drain()
+
+                    identity = winner.get_name()
+                    pending.add(asyncio.create_task(connected[identity][0].readline(), name=identity))
+            except ConnectionResetError:
+                pass
 
 async def main():
-    async with asyncio.start_server(callback, port=port) as server:
-        server.serve_forever()
+    async with await asyncio.start_server(callback, port=port) as server:
+        await asyncio.gather(client_loop(), server.serve_forever())
 
 asyncio.run(main())
