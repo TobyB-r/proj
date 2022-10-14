@@ -5,9 +5,10 @@ from client import Client
 
 ip = input("Enter IP: ")
 port = 9001
+identity = "windows"
 
 # Client is used just like Tk would be
-client = Client(ip, port)
+client = Client(ip, port, identity)
 client.title("Messenger")
 client.geometry("600x400")
 
