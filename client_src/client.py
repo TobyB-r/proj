@@ -23,12 +23,13 @@ class Client(Tk):
         self.writer.write(handshake.encode("ascii"))
         self.writer.write(b"\n")
         await self.writer.drain()
+
         # coroutines that happen continuously in the background
         # self.msg_client() sends messages when they enter msg_queue
         # self.listen() periodically checks if a message has been recieved by self.reader
         # self.updater() handles the UI like Tk.mainloop() would
         coro = [self.updater(), self.listen(), self.msg_client()]
-        await asyncio.gather(coro)
+        await asyncio.gather(*coro)
     
     # waits for messages in the queue then sends them
     async def msg_client(self):
@@ -36,7 +37,7 @@ class Client(Tk):
             # msg_queue.get() will wait until an item is added to the queue
             msg = await self.msg_queue.get()
             text = json.dumps(msg)
-            self.writer.write(text)
+            self.writer.write(text.encode("ascii"))
             self.writer.write(b"\n")
             await self.writer.drain()
             
