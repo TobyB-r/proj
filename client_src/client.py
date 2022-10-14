@@ -18,7 +18,11 @@ class Client(Tk):
     # begin the program
     async def start_loop(self):
         self.reader, self.writer = await asyncio.open_connection(self.ip, port=self.port)
-
+        
+        handshake = json.dumps({"identity": self.identity})
+        self.writer.write(handshake.encode("ascii"))
+        self.writer.write(b"\n")
+        await self.writer.drain()
         # coroutines that happen continuously in the background
         # self.msg_client() sends messages when they enter msg_queue
         # self.listen() periodically checks if a message has been recieved by self.reader
@@ -33,6 +37,7 @@ class Client(Tk):
             msg = await self.msg_queue.get()
             text = json.dumps(msg)
             self.writer.write(text)
+            self.writer.write(b"\n")
             await self.writer.drain()
             
             # history is a Tk Text widget that shows messages for the user
