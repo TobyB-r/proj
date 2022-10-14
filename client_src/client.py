@@ -57,7 +57,7 @@ class Client(Tk):
 
                 async with self.history_lock:
                     self.history.configure(state="normal")
-                    self.history.insert("ende", "\n" + obj["sender"] + " sent " + obj["message"])
+                    self.history.insert("end", "\n" + obj["sender"] + " sent: " + obj["message"])
                     self.history.configure(state="disabled")
 
     # replacement for Tk.mainloop()
