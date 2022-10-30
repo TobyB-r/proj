@@ -3,6 +3,8 @@ import json
 
 port = 9001
 connected = {}
+unsent = {}
+
 read_lock = asyncio.Lock()
 read_queue = asyncio.Queue()
 
@@ -11,6 +13,11 @@ async def callback(reader, writer):
     handshake = json.loads(text)
     identity = handshake["identity"]
     connected[identity] = (reader, writer)
+
+    if identity in unsent:
+        for message in unsent:
+            writer.write(message)
+            await writer.drain()
 
     read_queue.put_nowait(asyncio.create_task(reader.readline(), name=identity))
 
@@ -44,10 +51,14 @@ async def client_loop():
                         _, writer = connected[recipient]
                         writer.write(message)
                         await writer.drain()
+                    elif recipient in unsent:
+                        unsent[recipient].append(message)
+                    else:
+                        unsent[recipient] = [message]
 
                     identity = winner.get_name()
                     pending.add(asyncio.create_task(connected[identity][0].readline(), name=identity))
-            except ConnectionResetError:
+            except ConnectionError:
                 pass
 
 async def main():

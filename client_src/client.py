@@ -6,12 +6,19 @@ import json
 # subclassing Tk because Tk.mainloop() busy waits and blocks asyncio from executing
 # replacing mainloop and using asyncio.sleep() lets asyncio run between updates
 class Client(Tk):
-    def __init__(self, ip, port, identity):
+    def __init__(self, ip, port, identity, message_history):
         super().__init__()
+        
+        self.combobox = None
+        self.history = None
+
         self.ip = ip
         self.port = port
         self.identity = identity
+        self.contacts = message_history
+        self.current = None
         self.nextmsg = StringVar(self)
+
         self.msg_queue = asyncio.Queue()
         self.history_lock = asyncio.Lock()
 
@@ -46,19 +53,21 @@ class Client(Tk):
                 self.history.configure(state="normal")
                 self.history.insert( "end", "\nYou sent: " + msg["message"])
                 self.history.configure(state="disabled")
+                self.contacts[self.current].append((True, msg["message"]))
     
     # periodically checks if a message has been recieved
     async def listen(self):
         while True:
-            msg = await self.reader.readline()
+            text = await self.reader.readline()
 
-            if msg:
-                obj = json.loads(msg)
+            if text:
+                msg = json.loads(text)
 
                 async with self.history_lock:
                     self.history.configure(state="normal")
-                    self.history.insert("end", "\n" + obj["sender"] + " sent: " + obj["message"])
+                    self.history.insert("end", "\n" + msg["sender"] + " sent: " + msg["message"])
                     self.history.configure(state="disabled")
+                    self.contacts[self.current].append((False, msg["message"]))
 
     # replacement for Tk.mainloop()
     async def updater(self):
@@ -77,5 +86,19 @@ class Client(Tk):
         self.msg_queue.put_nowait({
             "sender": self.identity,
             "message": self.nextmsg.get(),
-            "recipient": "linux",
+            "recipient": self.combobox.get(),
         })
+
+    def convo_changed(self):
+        self.current = self.combobox.get()
+        oldstate = self.history["state"]
+        self.history.configure(state="normal")
+        self.history.delete("start", "end")
+
+        for message in self.contacts[self.current]:
+            if message[0]:
+                self.history.insert("end", "\nYou sent: " + message[1])
+            else:
+                self.history.insert("end", "\n" + self.current + " sent: " + message[1])
+
+        self.history.configure(state=oldstate)
