@@ -63,6 +63,7 @@ async def client_loop():
 
 async def main():
     async with await asyncio.start_server(callback, port=port) as server:
-        await asyncio.gather(client_loop(), server.serve_forever())
+        tasks = [client_loop(), server.serve_forever()]
+        await asyncio.gather(*tasks)
 
 asyncio.run(main())

@@ -9,7 +9,7 @@ identity = "windows"
 
 message_history = {
     "linux": [(False, "i need"), (False, "i sneed")],
-    "femboy": [(True, "other")]
+    "windows": [(False, "i need"), (False, "i sneed")],
 }
 
 # Client is used just like Tk would be
