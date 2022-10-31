@@ -2,15 +2,19 @@ import asyncio
 import tkinter
 from tkinter.ttk import *
 from client import Client
+import csv
+import itertools
 
 ip = input("Enter IP: ")
 port = 9001
 identity = "windows"
+message_history = {}
 
-message_history = {
-    "linux": [(False, "i need"), (False, "i sneed")],
-    "windows": [(False, "i need"), (False, "i sneed")],
-}
+with open("message_history.csv", "r") as file:
+    reader = csv.reader(file)
+    
+    for line in reader:
+        message_history[line[0]] = [(line[i] == "True", line[i+1]) for i in range(1, len(line), 2)]
 
 # Client is used just like Tk would be
 client = Client(ip, port, identity, message_history)
@@ -45,5 +49,14 @@ Button(frame, text="Send", command=client.send_msg).pack(side="bottom", padx=5, 
 
 # asyncio event loop is created and program starts
 # nothing after this runs
-
-asyncio.run(client.start_loop())
+try:
+    asyncio.run(client.start_loop())
+except:
+    pass
+finally:
+    with open("message_history.csv", "w", newline="") as file:
+        writer = csv.writer(file)
+        
+        for (contact, history) in message_history.items():
+            print(contact)
+            writer.writerow([contact, *itertools.chain(*history)])
