@@ -1,41 +1,45 @@
 import asyncio
-from tkinter import Tk, StringVar
+import tkinter as tk
+from tkinter import simpledialog
 import json
+
+# used to test the ui without a server or networking
+ONLINE = False
 
 # client class updates the ui and controls networking
 # subclassing Tk because Tk.mainloop() busy waits and blocks asyncio from executing
 # replacing mainloop and using asyncio.sleep() lets asyncio run between updates
-class Client(Tk):
-    def __init__(self, ip, port, identity, message_history):
+class Client(tk.Tk):
+    def __init__(self, port, message_history):
         super().__init__()
-        
-        self.combobox = None
-        self.history = None
-
-        self.ip = ip
+        self.running = True
         self.port = port
-        self.identity = identity
-        self.contacts = message_history
-        self.current = None
-        self.nextmsg = StringVar(self)
-
+        self.message_history = message_history
+        self.nextmsg = tk.StringVar(self)
         self.msg_queue = asyncio.Queue()
         self.history_lock = asyncio.Lock()
 
     # begin the program
     async def start_loop(self):
-        self.reader, self.writer = await asyncio.open_connection(self.ip, port=self.port)
-        
         handshake = json.dumps({"identity": self.identity})
-        self.writer.write(handshake.encode("ascii"))
-        self.writer.write(b"\n")
-        await self.writer.drain()
+        coro = []
+
+        if ONLINE:
+            self.reader, self.writer = await asyncio.open_connection(self.ip, port=self.port)
+            self.writer.write(handshake.encode("ascii"))
+            self.writer.write(b"\n")
+            await self.writer.drain()
+            
+            coro = [self.updater(), self.msg_client(), self.listen()]
+        else:
+            coro = [self.updater()]
 
         # coroutines that happen continuously in the background
         # self.msg_client() sends messages when they enter msg_queue
         # self.listen() periodically checks if a message has been recieved by self.reader
         # self.updater() handles the UI like Tk.mainloop() would
-        coro = [self.updater(), self.listen(), self.msg_client()]
+        
+        
         await asyncio.gather(*coro)
     
     # waits for messages in the queue then sends them
@@ -49,11 +53,10 @@ class Client(Tk):
             await self.writer.drain()
             
             # history is a Tk Text widget that shows messages for the user
-            async with self.history_lock:
-                self.history.configure(state="normal")
-                self.history.insert( "end", "\nYou sent: " + msg["message"])
-                self.history.configure(state="disabled")
-                self.contacts[self.current].append((True, msg["message"]))
+            self.history.configure(state="normal")
+            self.history.insert("end", "You sent: " + msg["message"] + "\n")
+            self.history.configure(state="disabled")
+            self.message_history[self.combobox.get()].append((True, msg["message"]))
     
     # periodically checks if a message has been recieved
     async def listen(self):
@@ -62,19 +65,25 @@ class Client(Tk):
 
             if text:
                 msg = json.loads(text)
+                sender = msg["sender"]
 
-                async with self.history_lock:
+                if self.combobox.get() == sender:
                     self.history.configure(state="normal")
-                    self.history.insert("end", "\n" + msg["sender"] + " sent: " + msg["message"])
+                    self.history.insert("end", sender + " sent: " + msg["message"] + "\n")
                     self.history.configure(state="disabled")
-                    self.contacts[self.current].append((False, msg["message"]))
+                
+                if sender in self.message_history:
+                    self.message_history[sender].append((False, msg["message"]))
+                else:
+                    self.message_history[sender] = [(False, msg["message"])]
+                    self.combobox["values"] += (sender,)
 
     # replacement for Tk.mainloop()
     async def updater(self):
         # sets a flag that Tk.mainloop() usually does, prevents some bugs
         self.willdispatch()
 
-        while True:
+        while self.running:
             # runs all events to do with tkinter and user input
             # asyncio.sleep() lets io happen in background
             self.update()
@@ -89,16 +98,27 @@ class Client(Tk):
             "recipient": self.combobox.get(),
         })
 
-    def convo_changed(self):
+    # the user select a different conversation
+    # fill history with the correct messages
+    def convo_changed(self, event):
         self.current = self.combobox.get()
-        oldstate = self.history["state"]
         self.history.configure(state="normal")
-        self.history.delete("start", "end")
+        self.history.delete("1.0", "end")
 
-        for message in self.contacts[self.current]:
+        for message in self.message_history[self.current]:
             if message[0]:
-                self.history.insert("end", "\nYou sent: " + message[1])
+                self.history.insert("end", "You sent: " + message[1] + "\n")
             else:
-                self.history.insert("end", "\n" + self.current + " sent: " + message[1])
+                self.history.insert("end", self.current + " sent: " + message[1] + "\n")
+        
+        self.history.configure(state="disabled")
 
-        self.history.configure(state=oldstate)
+    def new_contact(self):
+        contact = simpledialog.askstring("", "Enter username", parent=self)
+        
+        if contact not in self.message_history and contact:
+            self.message_history[contact] = []
+            self.combobox["values"] += (contact,)
+   
+    def close(self):
+        self.running = False
