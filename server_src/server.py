@@ -75,7 +75,9 @@ async def client_loop():
             if message != b"":
                 print(message)
                 print(identity)
+                print(read_queue.get)
                 print(identity == read_queue.get)
+                print(identity is read_queue.get)
                 
                 line = json.loads(message)
                 recipient = line["recipient"]
