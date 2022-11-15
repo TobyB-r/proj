@@ -63,7 +63,7 @@ async def client_loop():
 
             result = completed.result()
 
-            if result is asyncio.Task:
+            if type(result) is asyncio.Task:
                 # add the new task and wait for the next item in the queue
                 pending.add(result)
                 pending.add(asyncio.create_task(read_queue.get()))
