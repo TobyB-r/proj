@@ -88,7 +88,7 @@ async def client_loop():
 
             # if everything else completed successfully add it back to pending
             # the program won't get to this line if the task threw exception
-            pending.add(asyncio.create_task(connected[identity][0](), name=identity))
+            pending.add(asyncio.create_task(connected[identity][0].readline(), name=identity))
         except ConnectionError:
             del connected[identity]
             pass
