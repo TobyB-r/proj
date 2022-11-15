@@ -30,11 +30,11 @@ async def callback(reader, writer):
         del unsent[identity]
 
     read_queue.put_nowait(asyncio.create_task(reader.readline(),
-        name=(identity, reader.readline)))
+        name=identity))
 
 async def client_loop():
     # wait for a client to connect
-    pending = {asyncio.create_task(read_queue.get(), name=read_queue.get)}
+    pending = {asyncio.create_task(read_queue.get())}
     
     while True:
         # wait for any of the readers to respond
@@ -61,45 +61,36 @@ async def client_loop():
             if exception is not None:
                 raise exception
 
-            if identity == read_queue.get:
+            result = completed.result()
+
+            if result is asyncio.Task:
                 # add the new task and wait for the next item in the queue
-                pending.add(completed.result())
-                pending.add(asyncio.create_task(
-                    read_queue.get(), name=read_queue.get))
-                
+                pending.add(result)
+                pending.add(asyncio.create_task(read_queue.get()))
                 continue
-            
-            message = completed.result()
 
-            # message can be "" if the client disconnects
-            if message != b"":
-                print(message)
-                print(identity)
-                print(read_queue.get)
-                print(identity == read_queue.get)
-                print(identity is read_queue.get)
-                
-                line = json.loads(message)
-                recipient = line["recipient"]
-                print("Recieved message from", identity[0], "to", recipient)
+            if result == b"":
+                del connected[identity]
+                continue
+        
+            line = json.loads(result)
+            recipient = line["recipient"]
+            print("Recieved message from", identity, "to", recipient)
 
-                if recipient in connected:
-                    _, writer = connected[recipient]
-                    writer.write(message)
-                    await writer.drain()
-                elif recipient in unsent:
-                    unsent[recipient].append(message)
-                else:
-                    unsent[recipient] = [message]
-
-                # if everything else completed successfully add it back to pending
-                # the program won't get to this line if the task threw exception
-                pending.add(asyncio.create_task(
-                    identity[1](), name=identity))
+            if recipient in connected:
+                _, writer = connected[recipient]
+                writer.write(result)
+                await writer.drain()
+            elif recipient in unsent:
+                unsent[recipient].append(result)
             else:
-                del connected[identity[0]]
+                unsent[recipient] = [result]
+
+            # if everything else completed successfully add it back to pending
+            # the program won't get to this line if the task threw exception
+            pending.add(asyncio.create_task(connected[identity][0](), name=identity))
         except ConnectionError:
-            del connected[identity[0]]
+            del connected[identity]
             pass
 
 async def main():
