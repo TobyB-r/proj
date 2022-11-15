@@ -12,11 +12,14 @@ read_queue = asyncio.Queue()
 
 # called by the server when a client connects
 async def callback(reader, writer):
+    print("Callback called")
+
     # information about the client the second they connect
     text = await reader.readline()
     handshake = json.loads(text)
     identity = handshake["identity"]
     connected[identity] = (reader, writer)
+    print("Connected to", identity)
 
     # unsent messages were sent before the client connected
     if identity in unsent:
@@ -47,7 +50,7 @@ async def client_loop():
         # identity is the name of the completed task
         # if a reader finished first the name is the key in connected
         # if it was the read queue the name is read_queue.get
-        completed = list(done[0])
+        completed = list(done)[0]
         identity = completed.get_name()
 
         try:
@@ -70,8 +73,13 @@ async def client_loop():
 
             # message can be "" if the client disconnects
             if message != b"":
+                print(message)
+                print(identity)
+                print(identity == read_queue.get)
+                
                 line = json.loads(message)
                 recipient = line["recipient"]
+                print("Recieved message from", identity[0], "to", recipient)
 
                 if recipient in connected:
                     _, writer = connected[recipient]
