@@ -55,7 +55,7 @@ async def client_loop():
             # the task raised an exception
             exception = completed.exception()
             
-            if exception:
+            if exception is not None:
                 raise exception
 
             if identity == read_queue.get:

@@ -4,7 +4,7 @@ from tkinter import simpledialog
 import json
 
 # used to test the ui without a server or networking
-ONLINE = False
+ONLINE = True
 
 # client class updates the ui and controls networking
 # subclassing Tk because Tk.mainloop() busy waits and blocks asyncio from executing
