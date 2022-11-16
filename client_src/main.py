@@ -70,7 +70,7 @@ client.protocol("WM_DELETE_WINDOW", client.close)
 try:
     asyncio.run(client.start_loop())
 except Exception as e:
-    print(e)
+    print("Messenger closed due to", e)
 finally:
     with open("message_history.csv", "w", newline="") as file:
         writer = csv.writer(file)

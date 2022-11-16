@@ -21,15 +21,14 @@ class Client(tk.Tk):
 
     # begin the program
     async def start_loop(self):
-        handshake = json.dumps({"identity": self.identity})
-        coro = []
-
         if ONLINE:
+            handshake = json.dumps({"identity": self.identity})
+            
             self.reader, self.writer = await asyncio.open_connection(self.ip, port=self.port)
             self.writer.write(handshake.encode("ascii"))
             self.writer.write(b"\n")
             await self.writer.drain()
-            
+
             coro = [self.updater(), self.msg_client(), self.listen()]
         else:
             coro = [self.updater()]
@@ -39,12 +38,12 @@ class Client(tk.Tk):
         # self.listen() periodically checks if a message has been recieved by self.reader
         # self.updater() handles the UI like Tk.mainloop() would
         
-        
-        await asyncio.gather(*coro)
+        self.coros = asyncio.gather(*coro)
+        await self.coros
     
     # waits for messages in the queue then sends them
     async def msg_client(self):
-        while True:
+        while self.running:
             # msg_queue.get() will wait until an item is added to the queue
             msg = await self.msg_queue.get()
             text = json.dumps(msg)
@@ -60,7 +59,7 @@ class Client(tk.Tk):
     
     # periodically checks if a message has been recieved
     async def listen(self):
-        while True:
+        while self.running:
             text = await self.reader.readline()
 
             if text:
@@ -88,6 +87,8 @@ class Client(tk.Tk):
             # asyncio.sleep() lets io happen in background
             self.update()
             await asyncio.sleep(0.05)
+        
+        self.coros.cancel()
 
     # method used by the send button, has to be synchronous
     # send message is async so it adds item to the msg_queue

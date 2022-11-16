@@ -12,7 +12,7 @@ read_queue = asyncio.Queue()
 
 # called by the server when a client connects
 async def callback(reader, writer):
-    print("Callback called")
+    print("Connected to", writer.get_extra_info("peername"))
 
     # information about the client the second they connect
     text = await reader.readline()
@@ -25,8 +25,8 @@ async def callback(reader, writer):
     if identity in unsent:
         for message in unsent:
             writer.write(message)
-            await writer.drain()
         
+        await writer.drain()
         del unsent[identity]
 
     read_queue.put_nowait(asyncio.create_task(reader.readline(),
