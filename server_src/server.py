@@ -24,7 +24,7 @@ async def callback(reader, writer):
     # unsent messages were sent before the client connected
     if identity in unsent:
         for message in unsent:
-            writer.write(message)
+            writer.write(message.encode("ascii"))
         
         await writer.drain()
         del unsent[identity]
