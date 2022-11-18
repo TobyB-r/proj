@@ -67,14 +67,10 @@ client.protocol("WM_DELETE_WINDOW", client.close)
 # asyncio event loop is created and program starts
 # nothing after this runs
 
-try:
-    asyncio.run(client.start_loop())
-except Exception as e:
-    print("Messenger closed due to", e)
-finally:
-    with open("message_history.csv", "w", newline="") as file:
-        writer = csv.writer(file)
-        
-        for (contact, history) in client.message_history.items():
-            print(contact)
-            writer.writerow([contact, *itertools.chain(*history)])
+asyncio.run(client.start_loop())
+
+with open("message_history.csv", "w", newline="") as file:
+    writer = csv.writer(file)
+    
+    for (contact, history) in client.message_history.items():
+        writer.writerow([contact, *itertools.chain(*history)])

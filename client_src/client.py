@@ -46,16 +46,18 @@ class Client(tk.Tk):
         while self.running:
             # msg_queue.get() will wait until an item is added to the queue
             msg = await self.msg_queue.get()
-            text = json.dumps(msg)
-            self.writer.write(text.encode("ascii"))
-            self.writer.write(b"\n")
-            await self.writer.drain()
-            
-            # history is a Tk Text widget that shows messages for the user
-            self.history.configure(state="normal")
-            self.history.insert("end", "You sent: " + msg["message"] + "\n")
-            self.history.configure(state="disabled")
-            self.message_history[self.combobox.get()].append((True, msg["message"]))
+
+            if msg["recipient"]:
+                text = json.dumps(msg)
+                self.writer.write(text.encode("ascii"))
+                self.writer.write(b"\n")
+                await self.writer.drain()
+                
+                # history is a Tk Text widget that shows messages for the user
+                self.history.configure(state="normal")
+                self.history.insert("end", "You sent: " + msg["message"] + "\n")
+                self.history.configure(state="disabled")
+                self.message_history[msg["recipient"]].append((True, msg["message"]))
     
     # periodically checks if a message has been recieved
     async def listen(self):
@@ -63,6 +65,7 @@ class Client(tk.Tk):
             text = await self.reader.readline()
 
             if text:
+                print(text)
                 msg = json.loads(text)
                 sender = msg["sender"]
 

@@ -24,7 +24,9 @@ async def callback(reader, writer):
     # unsent messages were sent before the client connected
     if identity in unsent:
         for message in unsent:
-            writer.write(message.encode("ascii"))
+            msg = message.encode("ascii")
+            print("writing", msg)
+            writer.write(msg)
         
         await writer.drain()
         del unsent[identity]
@@ -81,10 +83,13 @@ async def client_loop():
                 _, writer = connected[recipient]
                 writer.write(result)
                 await writer.drain()
+                print("sent", result)
             elif recipient in unsent:
                 unsent[recipient].append(result)
+                print("didn't send", result)
             else:
                 unsent[recipient] = [result]
+                print("didn't send", result)
 
             # if everything else completed successfully add it back to pending
             # the program won't get to this line if the task threw exception
