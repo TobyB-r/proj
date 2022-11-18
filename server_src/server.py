@@ -23,7 +23,7 @@ async def callback(reader, writer):
 
     # unsent messages were sent before the client connected
     if identity in unsent:
-        for message in unsent:
+        for message in unsent[identity]:
             msg = message.encode("ascii")
             print("writing", msg)
             writer.write(msg)
