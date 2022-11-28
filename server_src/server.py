@@ -1,6 +1,7 @@
 import asyncio
 import json
 
+# port used to communicate
 port = 9001
 # connected contains the clients that are currently connected
 connected = {}
@@ -24,9 +25,8 @@ async def callback(reader, writer):
     # unsent messages were sent before the client connected
     if identity in unsent:
         for message in unsent[identity]:
-            msg = message.encode("ascii")
-            print("writing", msg)
-            writer.write(msg)
+            print("writing unsent", message)
+            writer.write(message)
         
         await writer.drain()
         del unsent[identity]
@@ -36,7 +36,7 @@ async def callback(reader, writer):
 
 async def client_loop():
     # wait for a client to connect
-    pending = {asyncio.create_task(read_queue.get())}
+    pending = {asyncio.create_task(read_queue.get(), name="readqueue")}
     
     while True:
         # wait for any of the readers to respond
@@ -51,7 +51,6 @@ async def client_loop():
         
         # identity is the name of the completed task
         # if a reader finished first the name is the key in connected
-        # if it was the read queue the name is read_queue.get
         completed = list(done)[0]
         identity = completed.get_name()
 
@@ -65,12 +64,14 @@ async def client_loop():
 
             result = completed.result()
 
+            # the task that finished was read_queue.get
             if type(result) is asyncio.Task:
                 # add the new task and wait for the next item in the queue
                 pending.add(result)
                 pending.add(asyncio.create_task(read_queue.get()))
                 continue
-
+            
+            # the task was the end of a reader
             if result == b"":
                 del connected[identity]
                 continue
@@ -79,6 +80,8 @@ async def client_loop():
             recipient = line["recipient"]
             print("Recieved message from", identity, "to", recipient)
 
+            # send the message if we are connected
+            # save it to send if we aren't
             if recipient in connected:
                 _, writer = connected[recipient]
                 writer.write(result)
