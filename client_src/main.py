@@ -1,7 +1,6 @@
 import asyncio
 import tkinter as tk
 from tkinter.ttk import *
-from tkinter import simpledialog
 from client import Client
 import csv
 import itertools
@@ -35,11 +34,6 @@ frame.rowconfigure(2, weight=1)
 # Elements of UI defined
 Label(frame, text="Instantaneous Messenger", font=("Arial", 19)).grid(row=0, columnspan=3, **pad)
 
-client.combobox = Combobox(frame)
-client.combobox.bind("<<ComboboxSelected>>", client.convo_changed)
-client.combobox["values"] = list(message_history.keys())
-client.combobox.grid(row=1, columnspan=3, **pad)
-
 frame1 = Frame(frame)
 frame1.grid(row=2, columnspan=3, sticky="news", **pad)
 frame1.columnconfigure(0, weight=1)
@@ -47,6 +41,10 @@ frame1.rowconfigure(0, weight=1)
 
 client.history = tk.Text(frame1, height=0, width=0, relief="solid")
 client.history.grid(row=0, column=0, sticky="news")
+
+client.optionmenu = OptionMenu(frame, client.convo, "Select Conversation", *message_history.keys())
+client.convo.trace_add("write", client.convo_changed)
+client.optionmenu.grid(row=1, columnspan=3, **pad)
 
 scroll = Scrollbar(frame1, orient="vertical", command=client.history.yview)
 client.history.configure(yscrollcommand=scroll.set)
@@ -56,17 +54,16 @@ Entry(frame, textvariable=client.nextmsg).grid(row=3, column=0, sticky="ew", **p
 Button(frame, text="Send", command=client.send_msg).grid(row=3, column=1, **pad)
 Button(frame, text="New Contact", command=client.new_contact).grid(row=3, column=2, **pad)
 
+# asking user for their username and IP of server
 client.ip = tk.simpledialog.askstring("", "Enter server IP", parent=client)
 client.identity = tk.simpledialog.askstring("", "Enter username", parent=client)
-client.history.insert("end", f"Your username is: {client.identity}\n")
-client.history.insert("end", f"Connecting to IP: {client.ip}")
+client.history.insert("end", f"Your username is: {client.identity}\nConnecting to IP: {client.ip}")
 client.history.configure(state="disabled")
 
 client.protocol("WM_DELETE_WINDOW", client.close)
 
 # asyncio event loop is created and program starts
-# nothing after this runs
-
+# nothing after this runs until client it is closed
 asyncio.run(client.start_loop())
 
 with open("message_history.csv", "w", newline="") as file:
