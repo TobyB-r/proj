@@ -4,7 +4,7 @@ from tkinter import simpledialog
 import json
 
 # used to test the ui without a server or networking
-ONLINE = False
+ONLINE = True
 
 # client class updates the ui and controls networking
 # subclassing Tk because Tk.mainloop() busy waits and blocks asyncio from executing
@@ -17,8 +17,11 @@ class Client(tk.Tk):
         self.message_history = message_history
         self.nextmsg = tk.StringVar(self)
         self.msg_queue = asyncio.Queue()
-        self.history_lock = asyncio.Lock()
         self.convo = tk.StringVar(self)
+        self.ip = None
+        self.history = None
+        self.optionmenu = None
+        self.identity = None
 
     # begin the program
     async def start_loop(self):
@@ -74,13 +77,13 @@ class Client(tk.Tk):
                 sender = msg["sender"]
 
                 # if the message is from the user we're talking to
-                if self.convo == sender:
+                if self.convo.get() == sender:
                     self.history.configure(state="normal")
                     self.history.insert("end", sender + " sent: " + msg["message"] + "\n")
                     self.history.configure(state="disabled")
                 
                 # add the message to the list to be added to csv
-                if sender in self.message_history:
+                if sender in self.message_history:  
                     self.message_history[sender].append((False, msg["message"]))
                 else:
                     self.message_history[sender] = [(False, msg["message"])]
@@ -97,8 +100,6 @@ class Client(tk.Tk):
             # asyncio.sleep() lets io happen in background
             self.update()
             await asyncio.sleep(0.05)
-        
-        self.coros.cancel()
 
     # method used by the send button, has to be synchronous
     # send message is async so it adds item to the msg_queue
@@ -106,7 +107,7 @@ class Client(tk.Tk):
         self.msg_queue.put_nowait({
             "sender": self.identity,
             "message": self.nextmsg.get(),
-            "recipient": self.convo,
+            "recipient": self.convo.get(),
         })
 
     # the user select a different conversation
@@ -133,3 +134,4 @@ class Client(tk.Tk):
    
     def close(self):
         self.running = False
+        self.coros.cancel()

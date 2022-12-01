@@ -10,6 +10,9 @@ identity = "windows"
 message_history = {}
 pad = {"padx":5, "pady":5}
 
+# used to test without adding to history
+HISTORY = False
+
 with open("message_history.csv", "r") as file:
     reader = csv.reader(file)
     
@@ -66,8 +69,9 @@ client.protocol("WM_DELETE_WINDOW", client.close)
 # nothing after this runs until client it is closed
 asyncio.run(client.start_loop())
 
-with open("message_history.csv", "w", newline="") as file:
-    writer = csv.writer(file)
-    
-    for (contact, history) in client.message_history.items():
-        writer.writerow([contact, *itertools.chain(*history)])
+if HISTORY:
+    with open("message_history.csv", "w", newline="") as file:
+        writer = csv.writer(file)
+        
+        for (contact, history) in client.message_history.items():
+            writer.writerow([contact, *itertools.chain(*history)])
