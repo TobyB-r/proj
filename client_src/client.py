@@ -1,6 +1,12 @@
-import asyncio
+from cryptography.hazmat.primitives import hashes, hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.fernet import Fernet
 import tkinter as tk
 from tkinter import simpledialog
+
+import asyncio
+import base64
 import json
 
 # used to test the ui without a server or networking
@@ -18,21 +24,35 @@ class Client(tk.Tk):
         self.nextmsg = tk.StringVar(self)
         self.msg_queue = asyncio.Queue()
         self.convo = tk.StringVar(self)
-        self.ip = None
-        self.history = None
-        self.optionmenu = None
-        self.identity = None
+        self.peer_private_key = ec.generate_private_key(ec.SECP384R1)
 
     # begin the program
     async def start_loop(self):
         if ONLINE:
-            handshake = json.dumps({"identity": self.identity})
-            
             self.reader, self.writer = await asyncio.open_connection(self.ip, port=self.port)
-            self.writer.write(handshake.encode("ascii"))
-            self.writer.write(b"\n")
+            
+            private_key = ec.generate_private_key(ec.SECP384R1)
+            public_key = private_key.public_key()
+
+            serialized_server_public = public_key.public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+
+            self.writer.write(serialized_server_public)
             await self.writer.drain()
 
+            peer_key = await self.reader.read(120)
+            peer_key = serialization.load_der_public_key(peer_key)
+            self.fernet = Fernet(derive_key(private_key, peer_key))
+            
+            handshake = self.fernet.encrypt(json.dumps({
+                "identity": self.identity
+            }).encode("ascii"))
+
+            self.writer.write(handshake + b"\n")
+            await self.writer.drain()
+            
             coro = [self.updater(), self.msg_client(), self.listen()]
         else:
             coro = [self.updater()]
@@ -54,10 +74,11 @@ class Client(tk.Tk):
             msg = await self.msg_queue.get()
 
             # checks if a recipient was selected when the message was sent
-            if msg["recipient"]:
+            if msg["recipient"] != "Select Conversation":
                 text = json.dumps(msg)
-                self.writer.write(text.encode("ascii"))
-                self.writer.write(b"\n")
+                text = self.fernet.encrypt(text.encode("ascii"))
+
+                self.writer.write(text + b"\n")
                 await self.writer.drain()
                 
                 # history is a Tk Text widget that shows messages for the user
@@ -69,10 +90,10 @@ class Client(tk.Tk):
     # periodically checks if a message has been recieved
     async def listen(self):
         while self.running:
-            text = await self.reader.readline()
-
-            if text:
-                print(text)
+            ciphertext = await self.reader.readline()
+            
+            if ciphertext:
+                text = self.fernet.decrypt(ciphertext)
                 msg = json.loads(text)
                 sender = msg["sender"]
 
@@ -95,11 +116,11 @@ class Client(tk.Tk):
         # sets a flag that Tk.mainloop() usually does, prevents some bugs
         self.willdispatch()
 
-        while self.running:
+        while True:
             # runs all events to do with tkinter and user input
             # asyncio.sleep() lets io happen in background
             self.update()
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.02)
 
     # method used by the send button, has to be synchronous
     # send message is async so it adds item to the msg_queue
@@ -135,3 +156,13 @@ class Client(tk.Tk):
     def close(self):
         self.running = False
         self.coros.cancel()
+
+def derive_key(private, public):
+    shared_key = private.exchange(ec.ECDH(), public)
+
+    return base64.urlsafe_b64encode(HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b"handshake-derivation"
+    ).derive(shared_key))
