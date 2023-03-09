@@ -29,6 +29,8 @@ class DoubleRatchet:
         self.root_key, self.ck_sending = kdf_root_key(shared_key, exchange(self.dh_sending, self.dh_receiving)) 
         self.ck_receiving = b""
         self.ad = ad
+        # init_msg contains information other users needs for x3dh exchange
+        # we attach this to every message we send until we have received a message
         self.init_msg = init_msg
 
         return self
@@ -43,6 +45,7 @@ class DoubleRatchet:
         self.ck_sending = b""
         self.ck_receiving = b""
         self.ad = ad
+        # initializing as receiver so the other user performed key exchange first
         self.init_msg = None
 
         return self
@@ -52,9 +55,9 @@ class DoubleRatchet:
         self.ck_sending, msg_key = kdf_chain_key(self.ck_sending)
         nonce = os.urandom(16)
 
-        # header contains information that the other users ratchet needs to decrypt the message
         ciphertext = AESGCM(msg_key).encrypt(nonce, plaintext, self.ad)
 
+        # header contains information that the other users ratchet needs to decrypt the message
         header = {
             "dh": b64encode(self.dh_sending.public_key().public_bytes(**ser_args)).decode("ascii"),
             "nonce": b64encode(nonce).decode("ascii"),
@@ -66,7 +69,7 @@ class DoubleRatchet:
         self.number_sent += 1
 
         if self.init_msg is not None:
-            # init message for other user to initialize double ratchet
+            # add keys from init msg to the header
             header |= self.init_msg
 
         return header, ciphertext
@@ -75,7 +78,7 @@ class DoubleRatchet:
         dh = header["dh"]
         nonce = header["nonce"].encode("ascii")
         
-        # we have received a message so the other user has received init message
+        # we have received a message so the other user has definitely received init message
         self.init_msg = None
         
         if dh + str(header["number_sent"]) in self.skipped_keys:
@@ -85,15 +88,18 @@ class DoubleRatchet:
             del self.skipped_keys[dh + str(header["number_sent"])]
             
             return AESGCM(msg_key).decrypt(b64decode(nonce), ciphertext, self.ad)
-        elif self.dh_receiving == None or b64encode(self.dh_receiving.public_bytes(**ser_args)).decode("ascii") != dh:
-            # other user performed a dh ratchet step or this is the first message received from a new contact
+        
+        if self.dh_receiving == None or b64encode(self.dh_receiving.public_bytes(**ser_args)).decode("ascii") != dh:
+            # other user has performed a dh ratchet step
+
+            # we skip any keys that we missed from the last ratchet
             self.skip_keys(dh, header["previous_sent"])
-            # perform dh ratchet step
             self.dh_ratchet(header)
 
-        # skip any keys we haven't received
+        # skip any keys we missed
         self.skip_keys(dh, header["number_sent"])
 
+        # derive key and decrypt normally
         self.ck_receiving, msg_key = kdf_chain_key(self.ck_receiving)
         self.number_received += 1
 
@@ -119,6 +125,7 @@ class DoubleRatchet:
         self.dh_sending = ec.generate_private_key(ec.SECP256R1)
         self.root_key, self.ck_sending = kdf_root_key(self.root_key, exchange(self.dh_sending, self.dh_receiving))
 
+    # used to serialize so that it can be stored in a file
     def serialize(self, password):
         dict = {
             "dh_sending": b64encode(self.dh_sending.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.BestAvailableEncryption(password))).decode("ascii"),
@@ -140,6 +147,7 @@ class DoubleRatchet:
         
         return json.dumps(dict)
 
+    # used to deserialize when loading contacts when client starts
     @classmethod
     def from_serialized(cls, str, password):
         dict = json.loads(str)
@@ -164,41 +172,17 @@ class DoubleRatchet:
         return self
 
 
+# deriving a new chain key and root key from the root key
 def kdf_root_key(root_key, salt):
     return (HKDF(SHA256(), 32, salt, b"root->root").derive(root_key), 
             HKDF(SHA256(), 32, root_key, b"root->chain").derive(salt))
 
+# deriving a new message key and chain key from the chain key
 def kdf_chain_key(chain_key):
     return (HKDF(SHA256(), 32, chain_key, b"chain->chain").derive(b"x" * 32), 
             HKDF(SHA256(), 32, chain_key, b"chain->message").derive(b"y" * 32))
 
+# DH exchange for the dh ratchet step
 def exchange(key_a, key_b):
     secret = key_a.exchange(ec.ECDH(), key_b)
     return HKDF(SHA256(), 32, b"", b"exchange kdf").derive(secret)
-
-# tests
-if __name__ == "__main__":
-    ad = b"stuff"
-    key_a = ec.generate_private_key(ec.SECP256R1)
-    key_b = ec.generate_private_key(ec.SECP256R1)
-    dh_key = ec.generate_private_key(ec.SECP256R1)
-
-    a = DoubleRatchet.init_sender(ad, key_a.exchange(ec.ECDH(), key_b.public_key()), dh_key.public_key(), None)
-    b = DoubleRatchet.init_receiver(ad, key_b.exchange(ec.ECDH(), key_a.public_key()), dh_key)
-
-    x1 = a.encrypt(b"stuff")
-    print(b.decrypt(*x1))
-    x2 = a.encrypt(b"stuff")
-    x3 = a.encrypt(b"things")
-    print(b.decrypt(*x3))
-    b = b.from_serialized(b.serialize())
-    print(b.decrypt(*x2))
-
-    a = a.from_serialized(a.serialize())
-
-    x1 = b.encrypt(b"stuff")
-    print(a.decrypt(*x1))
-    x2 = b.encrypt(b"stuff")
-    x3 = b.encrypt(b"things")
-    print(a.decrypt(*x3))
-    print(a.decrypt(*x2))

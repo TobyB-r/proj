@@ -24,23 +24,24 @@ async def callback(reader, writer):
 
         # information about the client the second they connect
         message = await reader.readline()
+
+        # verifying this is the real user
         signature = (await reader.readline())[:-1]
         signature = b64decode(signature)
         handshake = json.loads(message.decode("ascii"))
         _x3dh = handshake["x3dh"]
         id_key = serialization.load_der_public_key(b64decode(_x3dh["id_key"]))
-        print(signature)
         id_key.verify(signature, message, ec.ECDSA(SHA256()))
-
 
         identity = handshake["identity"]
         connected[identity] = writer
 
-        print("finished handshake")
-
+        # saving x3dh keys
         otp_keys[identity] = _x3dh["otp_keys"]
         del _x3dh["otp_keys"]
         x3dh[identity] = _x3dh
+
+        print("finished handshake")
 
         # unsent messages were sent before the client connected
         if identity in unsent:
@@ -64,21 +65,22 @@ async def callback(reader, writer):
                 del connected[identity]
                 return
             
+            # verifying the message
             signature = (await reader.readline())[:-1]
-            print(signature)
             signature = b64decode(signature)
             id_key.verify(signature, message, ec.ECDSA(SHA256()))
             print("received", message)    
             
-            
             header = message.decode("ascii")
             line = json.loads(header)
             
+            # this is request for x3dh keys
             if "request" in line:
                 if line["request"] in x3dh:
-                    x = {"identity": line["request"]}
-                    x |= x3dh[line["request"]]
+                    x = x3dh[line["request"]]
+                    x["identity"] = line["request"]
 
+                    # if there are any keys left for this user add one
                     if otp_keys[line["request"]]:
                         x["otp_key"] = otp_keys[line["request"]].pop()
                         x["otp_ind"] = len(otp_keys[line["request"]])
@@ -88,6 +90,8 @@ async def callback(reader, writer):
                     await writer.drain()
                     print("sent", response)
                 else:
+                    # we don't have keys for this user
+                    # send a json empty dictionary
                     writer.write(b"{}\n")
                     await writer.drain()
                     print("sent {}")

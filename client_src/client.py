@@ -35,14 +35,19 @@ class Client(tk.Tk):
         self.old_sp_key = None
         self.old_otp_keys = []
         self.alternate = False
+        self.success = False
 
     def load_keyset(self, id_key, sp_key, otp_keys, alternate):
+        # we save the old keys (from the last time the client was run)
+        # allows us to perform any exchanges that happened while offline, as these are the keys the server would have relayed 
         self.id_key = id_key
         self.old_sp_key = sp_key
         self.old_otp_keys = otp_keys
         self.alternate = alternate
 
     def generate_keyset(self):
+        # generate fresh keyset
+        # we do this everytime we connect to the server.
         self.sp_key = ec.generate_private_key(ec.SECP256R1)
         self.sp_key_sig = self.id_key.sign(self.sp_key.public_key().public_bytes(**ser_args), ec.ECDSA(SHA256()))
         self.otp_keys = [ec.generate_private_key(ec.SECP256R1) for _ in range(10)]
@@ -56,6 +61,9 @@ class Client(tk.Tk):
             except ConnectionRefusedError:
                 messagebox.showerror("Error", "Failed to connect to server. Please try again in a few minutes.")
                 return
+            
+            # we successfully connected to the server
+            self.success = True
 
             await self.send(json.dumps({
                 "identity": self.identity,
@@ -74,21 +82,39 @@ class Client(tk.Tk):
         try:
             async with self.taskgroup:
                 self.taskgroup.create_task(self.updater())
-
-                if ONLINE:
-                    self.taskgroup.create_task(self.listen())
+                self.taskgroup.create_task(self.listen())
         except ConnectionResetError:
             messagebox.showerror("Error", "Server disconnected unexpectedly. Please restart the program.")
         except Exception as e:
             print(e)
             print(traceback.format_exc())
     
+    # tkinter requires commands for events to be functions not coroutines so we use this instead
+    # asks the user for the name and then schedules for the coroutine to run
+    def new_contact(self):
+        contact = simpledialog.askstring("", "Enter username", parent=self)
+        
+        # TaskGroup schedules for the coroutine to be run soon
+        # this doesn't block while the coroutine executes
+        self.taskgroup.create_task(
+            self.request_contact(contact)
+        )
+    
+    # coroutine to send a message to the server requesting x3dh keys for a certain user
     async def request_contact(self, recipient):
         msg = { "request": recipient }
 
         header = json.dumps(msg).encode("ascii") + b"\n"
         await self.send(header)
     
+    # method used by the send button, has to be synchronous for tkinter
+    # send message is async so it schedules it with the taskgroup
+    def send_msg(self, *_):
+        if self.convo.get() != "Select Contact":
+            self.taskgroup.create_task(
+                self.async_send_msg(self.convo.get(), self.nextmsg.get())
+            )
+
     async def async_send_msg(self, recipient, message):
         header, ciphertext = self.message_history[recipient].double_ratchet.encrypt(message.encode("ascii"))
         header["recipient"] = recipient
@@ -99,6 +125,8 @@ class Client(tk.Tk):
         self.writer.write(ciphertext)
         await self.writer.drain()
         
+        # sometimes we send empty messages e.g. to allow other user to initialize ratchet
+        # message is not added to history if is "" (evaluates to False)
         if message:
             # history is a Tk Text widget that shows messages for the user
             self.history.configure(state="normal")
@@ -111,10 +139,14 @@ class Client(tk.Tk):
         while self.running:
             header = await self.reader.readline()
 
+            # server indicates that we requested x3dh for a user that does not exist
             if header == b"{}\n":
                 messagebox.showerror("Error", "Requested user does not exist.")
                 continue
+
+            # reader disconnected
             if header == b"":
+                # writer.is_closing means that we called writer.close(), we disconnected not the server
                 if not self.writer.is_closing():
                     messagebox.showerror("Error", "Server disconnected. Please restart program.")
                     self.taskgroup._abort()
@@ -123,6 +155,7 @@ class Client(tk.Tk):
 
             header = json.loads(header.decode("ascii"))
 
+            # response to a request for x3dh keys
             if "identity" in header:
                 contact = header["identity"]
 
@@ -137,6 +170,7 @@ class Client(tk.Tk):
                 self.message_history[contact] = Contact(ratchet, contact, [])
                 await self.async_send_msg(contact, "")
                 
+                # adding new contact to OptionMenu
                 self.optionmenu["menu"].add_command(label=contact, command=tk._setit(self.convo, contact))
                 self.convo.set(contact)
             else:
@@ -144,6 +178,8 @@ class Client(tk.Tk):
             
                 contact = header["sender"]
 
+                # this is a new contact
+                # we initialize x3dh from the header
                 if contact not in self.message_history:
                     if header["alternate"] == self.alternate:
                         ratchet = x3dh.init_receiver(header, self.id_key, self.sp_key, self.otp_keys)
@@ -182,28 +218,17 @@ class Client(tk.Tk):
             self.update()
             await asyncio.sleep(0.02)
 
-    # method used by the send button, has to be synchronous for tkinter
-    # send message is async so it schedules it with the taskgroup
-    def send_msg(self, *_):
-        if self.convo.get() != "Select Contact":
-            self.taskgroup.create_task(
-                self.async_send_msg(self.convo.get(), self.nextmsg.get())
-            )
-
-    def new_contact(self):
-        contact = simpledialog.askstring("", "Enter username", parent=self)
-        
-        self.taskgroup.create_task(
-            self.request_contact(contact)
-        )
-
     # the user select a different conversation
     # fill history with the correct messages
     def convo_changed(self, *_):
+        # configure(state="normal") allows us to edit text in self.history 
         self.history.configure(state="normal")
+        # clear text in self.history
         self.history.delete("1.0", "end")
+
         contact = self.convo.get()
 
+        # add messages from the contact they selected
         for message in self.message_history[contact].messages:
             if message[1]:
                 if message[0]:
@@ -211,17 +236,22 @@ class Client(tk.Tk):
                 else:
                     self.history.insert("end", contact + " sent: " + message[1] + "\n")
         
+        # prevents the user from being able to edit text in self.history themselves
         self.history.configure(state="disabled")
    
+    # called by tkinter when user clicks the X button to close window
     def close(self):
         self.running = False
         self.taskgroup.create_task(self.cleanup())
 
     async def cleanup(self):
+        # closes the connection to the server
         self.writer.close()
         await self.writer.wait_closed()
 
     async def send(self, msg):
+        # we sign every message we send to the server with our id_key
+        # this allows the server to authenticate messages they receive are actually from us
         signature = b64encode(self.id_key.sign(msg, ec.ECDSA(SHA256())))
         self.writer.write(msg)
         self.writer.write(signature + b"\n")

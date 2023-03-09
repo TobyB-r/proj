@@ -11,12 +11,13 @@ class Contact:
         self.double_ratchet = double_ratchet
         self.messages = messages
         self.name = name
-        print(name, "; initializing with", messages)
 
     @classmethod
     def from_serialized(cls, string, password):
         name, encrypted, double_ratchet = string.split("\\")
         encrypted = json.loads(encrypted)
+
+        # deriving values for AES from the password and name
         key = HKDF(SHA256(), 32, b"", b"dr_storage").derive(password)
         ad = name.encode("ascii")  
 
@@ -29,6 +30,8 @@ class Contact:
       
     def serialize(self, password):
         encrypted = []
+
+        # deriving values for AES from the password and name
         key = HKDF(SHA256(), 32, b"", b"dr_storage").derive(password)
         ad = self.name.encode("ascii")
 
@@ -39,9 +42,9 @@ class Contact:
         return "\\".join([self.name, json.dumps(encrypted), self.double_ratchet.serialize(password)])
 
     def add_sent(self, msg):
-        print(self.name, "; adding sent", msg, "to", self.messages)
+        # first index indicates message was sent by us
         self.messages.append([True, msg])
     
     def add_received(self, msg):
-        print(self.name, "; adding received", msg, "to", self.messages)
+        # first index indicates message was sent by the other user
         self.messages.append([False, msg])
