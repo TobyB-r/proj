@@ -32,10 +32,18 @@ def init_sender(id_key, header):
         peer_otp_key = serialization.load_der_public_key(base64.b64decode(header["otp_key"]))
         dh4 = eph_key.exchange(ec.ECDH(), peer_otp_key)
 
+    print("dh1", dh1)
+    print("dh2", dh2)
+    print("dh3", dh3)
+    print("dh4", dh4)
+
     # shared key initializes the root key for the double ratchet
     shared_key = HKDF(SHA256(), 32, b"", b"x3dh").derive(dh1 + dh2 + dh3 + dh4)
     # additional data is used to authenticate encryption and users can compare it to prevent mitm attacks
     additional_data = HKDF(SHA256(), 32, b"", b"ad").derive(id_key.exchange(ec.ECDH(), peer_id_key))
+
+    print("shared_key", shared_key)
+    print("additional_data", additional_data)
 
     init_msg = {
         "alternate": header["alternate"],
@@ -68,10 +76,18 @@ def init_receiver(header, id_key, sp_key, otp_keys):
         otp_key = otp_keys[header["otp_ind"]]
         dh4 = otp_key.exchange(ec.ECDH(), peer_eph_key)
     
+    print("dh1", dh1)
+    print("dh2", dh2)
+    print("dh3", dh3)
+    print("dh4", dh4)
+
     # shared key initializes the root key for the double ratchet
     shared_key = HKDF(SHA256(), 32, b"", b"x3dh").derive(dh1 + dh2 + dh3 + dh4)
     # additional data is used to authenticate encryption and users can compare it to prevent mitm attacks
     additional_data = HKDF(SHA256(), 32, b"", b"ad").derive(id_key.exchange(ec.ECDH(), peer_id_key))
+
+    print("shared_key", shared_key)
+    print("additional_data", additional_data)
 
     ratchet = DoubleRatchet.init_receiver(additional_data, shared_key, sp_key)
     

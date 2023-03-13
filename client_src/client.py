@@ -3,16 +3,16 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.exceptions import InvalidSignature
 import tkinter as tk
+from tkinter import ttk
 from tkinter import simpledialog
 from tkinter import messagebox
 
 import asyncio
 import traceback
-from base64 import b64encode, b64decode
+from base64 import b64encode
 import json
-import time
 
-from contact import Contact
+from contact import Contact, GroupChat
 import x3dh
 
 ser_args = {"encoding": serialization.Encoding.DER, "format": serialization.PublicFormat.SubjectPublicKeyInfo}
@@ -29,6 +29,8 @@ class Client(tk.Tk):
         self.running = True
         self.port = port
         self.message_history = {}
+        self.group_chats = {}
+        self.x3dh_requests = {}
         self.nextmsg = tk.StringVar(self)
         self.convo = tk.StringVar(self)
         self.taskgroup = asyncio.TaskGroup()
@@ -36,6 +38,7 @@ class Client(tk.Tk):
         self.old_otp_keys = []
         self.alternate = False
         self.success = False
+        self.gc_buttons = []
 
     def load_keyset(self, id_key, sp_key, otp_keys, alternate):
         # we save the old keys (from the last time the client was run)
@@ -65,7 +68,7 @@ class Client(tk.Tk):
             # we successfully connected to the server
             self.success = True
 
-            await self.send(json.dumps({
+            await self.sign_send(json.dumps({
                 "identity": self.identity,
                 "x3dh": {
                     "alternate": self.alternate,
@@ -82,7 +85,9 @@ class Client(tk.Tk):
         try:
             async with self.taskgroup:
                 self.taskgroup.create_task(self.updater())
-                self.taskgroup.create_task(self.listen())
+
+                if ONLINE:
+                    self.taskgroup.create_task(self.listen())
         except ConnectionResetError:
             messagebox.showerror("Error", "Server disconnected unexpectedly. Please restart the program.")
         except Exception as e:
@@ -93,6 +98,8 @@ class Client(tk.Tk):
     # asks the user for the name and then schedules for the coroutine to run
     def new_contact(self):
         contact = simpledialog.askstring("", "Enter username", parent=self)
+
+        self.x3dh_requests[contact] = [("", {})]
         
         # TaskGroup schedules for the coroutine to be run soon
         # this doesn't block while the coroutine executes
@@ -102,28 +109,36 @@ class Client(tk.Tk):
     
     # coroutine to send a message to the server requesting x3dh keys for a certain user
     async def request_contact(self, recipient):
+        if recipient == self.identity:
+            return
+        
         msg = { "request": recipient }
 
         header = json.dumps(msg).encode("ascii") + b"\n"
-        await self.send(header)
+        await self.sign_send(header)
     
     # method used by the send button, has to be synchronous for tkinter
     # send message is async so it schedules it with the taskgroup
     def send_msg(self, *_):
-        if self.convo.get() != "Select Contact":
+        convo = self.convo.get()
+        message = self.nextmsg.get()
+        
+        if convo == self.identity or convo == "Select Conversation":
+            return
+        
+        if convo in self.group_chats:
+            self.group_chats[convo].add_sent(message)
+
+            for member in self.group_chats[convo].members:
+                self.taskgroup.create_task(
+                    self.async_send_msg(member, message, {"gc": convo, "members": self.group_chats[convo].members})
+                )
+        else:
+            self.message_history[convo].add_sent(message)
+
             self.taskgroup.create_task(
-                self.async_send_msg(self.convo.get(), self.nextmsg.get())
+                self.async_send_msg(convo, message)
             )
-
-    async def async_send_msg(self, recipient, message):
-        header, ciphertext = self.message_history[recipient].double_ratchet.encrypt(message.encode("ascii"))
-        header["recipient"] = recipient
-        header["sender"] = self.identity
-
-        text = json.dumps(header).encode("ascii") + b"\n"
-        await self.send(text)
-        self.writer.write(ciphertext)
-        await self.writer.drain()
         
         # sometimes we send empty messages e.g. to allow other user to initialize ratchet
         # message is not added to history if is "" (evaluates to False)
@@ -132,11 +147,82 @@ class Client(tk.Tk):
             self.history.configure(state="normal")
             self.history.insert("end", "You sent: " + message + "\n")
             self.history.configure(state="disabled")
-            self.message_history[recipient].add_sent(message)
+
+    async def async_send_msg(self, recipient, message, additional_args={}):
+        print("async_send_msg", recipient, message, additional_args)
+
+        if recipient not in self.message_history:
+            if recipient in self.x3dh_requests:
+                self.x3dh_requests[recipient].append((message, additional_args))
+            else:
+                self.x3dh_requests[recipient] = [(message, additional_args)]
+            
+            await self.request_contact(recipient)
+            return
+        
+        if recipient == self.identity:
+            return
+        
+        header, ciphertext = self.message_history[recipient].double_ratchet.encrypt(message.encode("ascii"))
+        header["recipient"] = recipient
+        header["sender"] = self.identity
+        header |= additional_args
+        text = json.dumps(header).encode("ascii") + b"\n"
+        
+        print("sent", text)
+
+        await self.sign_send(text)
+        self.writer.write(ciphertext)
+        await self.writer.drain()
+
+    def new_gc(self, *args):
+        name = simpledialog.askstring("", "Enter chat name", parent=self)
+        x = OptionDialog(self, "", members=list(self.message_history.keys()))
+
+        members = [x.members[i] for i in range(len(x.members)) if x.vars[i].get()]
+        members.append(self.identity)
+        
+        if name:
+            self.group_chats[name] = GroupChat(name, members, [])
+
+        self.optionmenu["menu"].add_command(label=name, command=tk._setit(self.convo, name))
+        self.convo.set(name)
+
+        for member in members:
+            self.taskgroup.create_task(self.async_send_msg(member, "", {"gc": self.convo.get(), "members": members}))
+
+    def add_user(self, *args):
+        username = simpledialog.askstring("", "Enter username", parent=self)
+
+        if username not in self.message_history:
+            messagebox.showerror("Error", "Add user as a contact first.")
+            return
+        
+        gc = self.group_chats[self.convo.get()]
+        gc.members.append(username)
+        
+        for member in gc.members:
+            self.taskgroup.create_task(self.async_send_msg(member, "", {"gc": self.convo.get(), "members": gc.members}))
+
+    def remove_user(self, *args):
+        username = simpledialog.askstring("", "Enter username", parent=self)
+        gc = self.group_chats[self.convo.get()]
+        gc.members.remove(username)
+        
+        for member in gc.members:
+            self.taskgroup.create_task(self.async_send_msg(member, "", {"gc": self.convo.get(), "members": gc.members}))
+
+    def leave_gc(self, *args):
+        gc = self.group_chats[self.convo.get()]
+        gc.members.remove(self.identity)
+
+        for member in gc.members:
+            self.taskgroup.create_task(self.async_send_msg(member, "", {"gc": self.convo.get(), "members": gc.members}))
     
-    # periodically checks if a message has been recieved
+    # waits for messages to be received
     async def listen(self):
         while self.running:
+            print("waiting for message")
             header = await self.reader.readline()
 
             # server indicates that we requested x3dh for a user that does not exist
@@ -153,50 +239,108 @@ class Client(tk.Tk):
                 
                 return
 
+            print("received", header)
             header = json.loads(header.decode("ascii"))
 
             # response to a request for x3dh keys
             if "identity" in header:
                 contact = header["identity"]
 
-                if not contact or contact in self.message_history:
+                if contact not in self.x3dh_requests:
                     continue
                 
                 try:
                     ratchet = x3dh.init_sender(self.id_key, header)
                 except InvalidSignature:
-                    messagebox.showerror("Error", "Failed to verify requested contact's keys.")
+                    messagebox.showerror("Error", f"Failed to verify requested contact {contact}'s keys.")
+                    continue
+                except Exception:
+                    messagebox.showerror("Error", f"Failed to add contact {contact}.")
+                    continue
 
                 self.message_history[contact] = Contact(ratchet, contact, [])
-                await self.async_send_msg(contact, "")
+
+                flag = True
+
+                for message, args in self.x3dh_requests[contact]:
+                    if "gc" in args:
+                        flag = False
+
+                    self.taskgroup.create_task(self.async_send_msg(contact, message, args))
+
+                del self.x3dh_requests[contact]
                 
                 # adding new contact to OptionMenu
                 self.optionmenu["menu"].add_command(label=contact, command=tk._setit(self.convo, contact))
-                self.convo.set(contact)
-            else:
-                ciphertext = await self.reader.readexactly(header["length"])
-            
-                contact = header["sender"]
-
-                # this is a new contact
-                # we initialize x3dh from the header
-                if contact not in self.message_history:
-                    if header["alternate"] == self.alternate:
-                        ratchet = x3dh.init_receiver(header, self.id_key, self.sp_key, self.otp_keys)
-
-                        if "otp_ind" in header:
-                            self.otp_keys[header["otp_ind"]] = None
-                    else:
-                        ratchet = x3dh.init_receiver(header, self.id_key, self.old_sp_key, self.old_otp_keys)
-    
-                        if "otp_ind" in header:
-                            self.old_otp_keys[header["otp_ind"]] = None
-
-                    self.message_history[contact] = Contact(ratchet, contact, [])
-                    
-                    self.optionmenu["menu"].add_command(label=contact, command=tk._setit(self.convo, contact))
+                
+                if flag:
                     self.convo.set(contact)
 
+                continue
+            
+            ciphertext = await self.reader.readexactly(header["length"])
+        
+            contact = header["sender"]
+
+            # this is a new contact
+            # we initialize x3dh from the header
+            if contact not in self.message_history and contact != self.identity:
+                if header["alternate"] == self.alternate:
+                    ratchet = x3dh.init_receiver(header, self.id_key, self.sp_key, self.otp_keys)
+
+                    if "otp_ind" in header:
+                        self.otp_keys[header["otp_ind"]] = None
+                else:
+                    ratchet = x3dh.init_receiver(header, self.id_key, self.old_sp_key, self.old_otp_keys)
+
+                    if "otp_ind" in header:
+                        self.old_otp_keys[header["otp_ind"]] = None
+
+                self.message_history[contact] = Contact(ratchet, contact, [])
+                
+                self.optionmenu["menu"].add_command(label=contact, command=tk._setit(self.convo, contact))
+
+                if "gc" not in header:
+                    self.convo.set(contact)
+            
+            if "gc" in header:
+                gc = header["gc"]
+
+                if gc not in self.group_chats:
+                    self.group_chats[gc] = GroupChat(gc, header["members"], [])
+                    self.optionmenu["menu"].add_command(label=gc, command=tk._setit(self.convo, gc))
+                    self.convo.set(gc)
+                else:
+                    new_set = set(header["members"])
+                    history_set = set(self.group_chats[gc].members)
+                    
+                    if new_set != history_set:
+                        self.history.configure(state="normal")
+
+                        if self.identity not in new_set:
+                            self.convo.set("Select Conversation")
+                            del self.group_chats[gc]
+                            continue
+
+                        for member in history_set - new_set:
+                            self.history.insert("end", contact + " removed: " + member + "\n")
+
+                        for member in new_set - history_set:
+                            self.history.insert("end", contact + " added: " + member + "\n")
+
+                        self.history.configure(state="disabled")
+
+                        self.group_chats[gc].members = header["members"]   
+
+                message = self.message_history[contact].double_ratchet.decrypt(header, ciphertext)
+
+                if message:
+                    if self.convo.get() == gc:
+                        self.group_chats[gc].add_received(contact, message.decode("ascii"))
+                        self.history.configure(state="normal")
+                        self.history.insert("end", contact + " sent: " + message.decode("ascii") + "\n")
+                        self.history.configure(state="disabled")  
+            else:
                 message = self.message_history[contact].double_ratchet.decrypt(header, ciphertext)
                 self.message_history[contact].add_received(message.decode("ascii"))
                 
@@ -226,15 +370,41 @@ class Client(tk.Tk):
         # clear text in self.history
         self.history.delete("1.0", "end")
 
-        contact = self.convo.get()
+        convo = self.convo.get()
 
-        # add messages from the contact they selected
-        for message in self.message_history[contact].messages:
-            if message[1]:
-                if message[0]:
-                    self.history.insert("end", "You sent: " + message[1] + "\n")
-                else:
-                    self.history.insert("end", contact + " sent: " + message[1] + "\n")
+        if convo == "Select Conversation":
+            # prevents the user from being able to edit text in self.history themselves
+            self.history.configure(state="disabled")
+
+
+        if convo in self.message_history:
+            contact = self.message_history[convo]
+
+            if self.gc_buttons != []:
+                for button in self.gc_buttons:
+                    button.destroy()
+                
+                self.gc_buttons = []
+            
+            # add messages from the contact they selected
+            for message in contact.messages:
+                if message[1]:
+                    if message[0]:
+                        self.history.insert("end", f"You sent: {message[1]}\n")
+                    else:
+                        self.history.insert("end", f"{contact.name} sent: {message[1]}\n")
+        else:
+            if self.gc_buttons == []:
+                self.gc_buttons.append(ttk.Button(self.frame3, text="Add User", command=self.add_user))
+                self.gc_buttons[0].grid(row=0, column=3, padx=5, pady=5)
+                self.gc_buttons.append(ttk.Button(self.frame3, text="Remove User", command=self.remove_user))
+                self.gc_buttons[1].grid(row=0, column=4, padx=5, pady=5)
+                self.gc_buttons.append(ttk.Button(self.frame3, text="Leave Group Chat", command=self.leave_gc))
+                self.gc_buttons[2].grid(row=0, column=5, padx=5, pady=5)
+
+            # contact is a group chat
+            for message in self.group_chats[convo].messages:
+                self.history.insert("end", f"{message[0]} sent: {message[1]}\n")
         
         # prevents the user from being able to edit text in self.history themselves
         self.history.configure(state="disabled")
@@ -249,10 +419,29 @@ class Client(tk.Tk):
         self.writer.close()
         await self.writer.wait_closed()
 
-    async def send(self, msg):
+    async def sign_send(self, msg):
         # we sign every message we send to the server with our id_key
         # this allows the server to authenticate messages they receive are actually from us
         signature = b64encode(self.id_key.sign(msg, ec.ECDSA(SHA256())))
         self.writer.write(msg)
         self.writer.write(signature + b"\n")
         await self.writer.drain()
+
+# class for the dialog that appears to choose contacts to select when the user starts a gc
+class OptionDialog(simpledialog.Dialog):
+    def __init__(self, *args, members):
+        self.members = members
+        super().__init__(*args)
+
+    def body(self, master):
+        menu_button = ttk.Menubutton(master, text="Select Members")
+        self.vars = []
+        menu = tk.Menu(menu_button, tearoff=0)
+
+        for i, option in enumerate(self.members):
+            self.vars.append(tk.IntVar())
+            menu.add_checkbutton(label=option, variable=self.vars[i])
+
+        menu_button["menu"] = menu
+        menu_button.pack()
+        

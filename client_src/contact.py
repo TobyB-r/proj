@@ -48,3 +48,15 @@ class Contact:
     def add_received(self, msg):
         # first index indicates message was sent by the other user
         self.messages.append([False, msg])
+
+class GroupChat():
+    def __init__(self, name, members, messages):
+        self.name = name
+        self.members = members
+        self.messages = messages
+    
+    def add_received(self, sender, message):
+        self.messages.append([sender, message])
+    
+    def add_sent(self, message):
+        self.messages.append(["You", message])

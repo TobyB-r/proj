@@ -71,8 +71,7 @@ async def callback(reader, writer):
             id_key.verify(signature, message, ec.ECDSA(SHA256()))
             print("received", message)    
             
-            header = message.decode("ascii")
-            line = json.loads(header)
+            line = json.loads(message.decode("ascii"))
             
             # this is request for x3dh keys
             if "request" in line:
