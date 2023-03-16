@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter.ttk import *
 from tkinter import messagebox
 from client import Client
-from contact import Contact
+from contact import Contact, GroupChat
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from cryptography.exceptions import *
@@ -37,7 +37,7 @@ client.frame3 = Frame(frame1)
 client.frame3.grid(row=1, columnspan=2)
 
 # client.history is a Text widget that shows messages sent and received from the current user
-client.history = tk.Text(frame2, height=0, width=0, relief="solid")
+client.history = tk.Text(frame2, height=0, width=0, relief="solid", font=("Arial", 10))
 client.history.grid(row=0, column=0, sticky="news")
 
 # menu with options allowing users to select which contact to talk to
@@ -56,7 +56,7 @@ entry.grid(row=3, column=0, sticky="ew", **pad)
 entry.bind("<Return>", client.send_msg)
 
 # button to send messages
-Button(frame1, text="Send", command=client.send_msg).grid(row=3, column=1, **pad)
+Button(frame1, text="Send Image", command=client.send_image).grid(row=3, column=1, **pad)
 
 # button to add contacts
 Button(client.frame3, text="New Contact", command=client.new_contact).grid(row=0, column=1, **pad)
@@ -66,8 +66,34 @@ Button(client.frame3, text="Create Group Chat", command=client.new_gc).grid(row=
 
 # asking user for their username and IP of server
 client.ip = tk.simpledialog.askstring("", "Enter server IP", parent=client)
-client.identity = tk.simpledialog.askstring("", "Enter username", parent=client)
-client.password = tk.simpledialog.askstring("", "Enter password", parent=client, show="*").encode("ascii")
+
+while True:
+    client.identity = tk.simpledialog.askstring("", "Enter username", parent=client)
+    
+    try:
+        client.identity.encode()
+        break
+    except UnicodeDecodeError:
+        messagebox.showerror("Validation", "Username must be utf8 encodable.")
+
+while True:
+    client.password = tk.simpledialog.askstring("", "Enter password", parent=client, show="*")
+    
+    if len(client.password) < 8:
+        messagebox.showerror("Validation", "Password must be longer than 8 characters.")
+    elif client.password.lower() == client.password:
+        messagebox.showerror("Validation", "Password must contain an uppercase letter.")
+    elif client.password.isalpha():
+        messagebox.showerror("Validation", "Password must contain numbers or symbols")
+    else:
+        try:
+            client.password = client.password.encode()
+            break
+        except UnicodeDecodeError:
+            messagebox.showerror("Validation", "Password must be utf8 encodable.")
+            continue
+
+
 client.history.insert("end", f"Your username is: {client.identity}\nConnecting to IP: {client.ip}")
 client.history.configure(state="disabled")
 
@@ -109,10 +135,16 @@ try:
         with open(f"message_history_{client.identity}.txt", "r") as file:
             for line in file:
                 if line:
-                    contact = Contact.from_serialized(line, client.password)
-                    client.message_history[contact.name] = contact
-                    # adding the user to the OptionMenu
-                    client.optionmenu["menu"].add_command(label=contact.name, command=tk._setit(client.convo, contact.name))
+                    if line[0] == "c":
+                        contact = Contact.from_serialized(line[1:], client.password, client.identity.encode("ascii"))
+                        client.message_history[contact.name] = contact
+                        # adding the user to the OptionMenu
+                        client.optionmenu["menu"].add_command(label=contact.name, command=tk._setit(client.convo, contact.name))
+                    elif line[0] == "g":
+                        contact = GroupChat.from_serialized(line[1:], client.password, client.identity.encode("ascii"))
+                        client.group_chats[contact.name] = contact
+                        # adding the user to the OptionMenu
+                        client.optionmenu["menu"].add_command(label=contact.name, command=tk._setit(client.convo, contact.name))
 except ValueError:
     messagebox.showerror("Error", "Password or username is incorrect.")
     exit()
@@ -125,7 +157,10 @@ asyncio.run(client.start_loop())
 if client.message_history:
     with open(f"message_history_{client.identity}.txt", "w") as file:
         for contact in client.message_history.values():
-            file.write(contact.serialize(client.password) + "\n")
+            file.write("c" + contact.serialize(client.password, client.identity.encode()) + "\n")
+        
+        for gc in client.group_chats.values():
+            file.write("g" + gc.serialize(client.password, client.identity.encode()) + "\n")
 
 # write the new set of keys we generated to file.
 # client.success indicates we successfully connected to the server

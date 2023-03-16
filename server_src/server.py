@@ -4,7 +4,6 @@ from base64 import b64decode
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.hashes import SHA256
-import time
 
 # port used to communicate
 port = 9001
@@ -48,7 +47,7 @@ async def callback(reader, writer):
             print(unsent[identity])
             for msg in unsent[identity]:
                 message, ciphertext = msg
-                print("writing unsent", message, ciphertext)
+                print("writing unsent", message)
                 writer.write(message + ciphertext)
                 await writer.drain()
             
@@ -108,7 +107,7 @@ async def callback(reader, writer):
                 x_writer.write(message + ciphertext)
                 await x_writer.drain()
 
-                print("sent", message, ciphertext)
+                print("sent", message)
             elif recipient in unsent:
                 unsent[recipient].append((message, ciphertext))
             else:
