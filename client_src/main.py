@@ -26,15 +26,15 @@ frame1.columnconfigure(0, weight=1)
 frame1.rowconfigure(2, weight=1)
 
 # Elements of UI defined
-Label(frame1, text="Instantaneous Messenger", font=("Arial", 19)).grid(row=0, columnspan=2, **pad)
+Label(frame1, text="Instantaneous Messenger", font=("Arial", 19)).grid(row=0, columnspan=3, **pad)
 
 frame2 = Frame(frame1)
-frame2.grid(row=2, columnspan=2, sticky="news", **pad)
+frame2.grid(row=2, columnspan=3, sticky="news", **pad)
 frame2.columnconfigure(0, weight=1)
 frame2.rowconfigure(0, weight=1)
 
 client.frame3 = Frame(frame1)
-client.frame3.grid(row=1, columnspan=2)
+client.frame3.grid(row=1, columnspan=3)
 
 # client.history is a Text widget that shows messages sent and received from the current user
 client.history = tk.Text(frame2, height=0, width=0, relief="solid", font=("Arial", 10))
@@ -56,7 +56,8 @@ entry.grid(row=3, column=0, sticky="ew", **pad)
 entry.bind("<Return>", client.send_msg)
 
 # button to send messages
-Button(frame1, text="Send Image", command=client.send_image).grid(row=3, column=1, **pad)
+Button(frame1, text="Send", command=client.send_msg).grid(row=3, column=1, **pad)
+Button(frame1, text="Send Image", command=client.send_image).grid(row=3, column=2, **pad)
 
 # button to add contacts
 Button(client.frame3, text="New Contact", command=client.new_contact).grid(row=0, column=1, **pad)

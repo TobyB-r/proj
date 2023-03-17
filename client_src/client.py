@@ -105,7 +105,7 @@ class Client(tk.Tk):
     def new_contact(self):
         contact = simpledialog.askstring("", "Enter username", parent=self)
 
-        self.x3dh_requests[contact] = [("", {})]
+        self.x3dh_requests[contact] = [(b"", {})]
         
         # TaskGroup schedules for the coroutine to be run soon
         # this doesn't block while the coroutine executes
@@ -155,6 +155,8 @@ class Client(tk.Tk):
             self.history.configure(state="disabled")
 
     async def async_send_msg(self, recipient, message, additional_args={}):
+        # request keys if we do not have a contact for them
+        # save the message we were going to send to them
         if recipient not in self.message_history:
             if recipient in self.x3dh_requests:
                 self.x3dh_requests[recipient].append((message, additional_args))
@@ -186,23 +188,26 @@ class Client(tk.Tk):
             return
         
         convo = self.convo.get()
-               
-        if convo == self.identity or convo == "Select Conversation":
+        
+        if convo == "Select Conversation":
             return
         
+        # the user has a group chat selected
         if convo in self.group_chats:
             self.group_chats[convo].add_sent(True, f"{self.identity}_images/" + os.path.basename(file))
             members = self.group_chats[convo].members
             self.taskgroup.create_task(self.async_send_image(members, file, {"gc": convo, "members": members}))
-        else:
+        else: # the user selected a contact with a single other user, not a gc
             self.taskgroup.create_task(self.async_send_image([convo], file, {}))
 
             self.message_history[convo].add_sent(True, f"{self.identity}_images/" + os.path.basename(file))
     
+    # read image from file
     def readfile_blocking(self, filename):
         with open(filename, "rb") as file:
             return file.read()
     
+    # write image to file
     def write_image(self, filename, ext, data):
         if not os.path.isdir(f"{self.identity}_images"):
             os.makedirs(f"{self.identity}_images")
@@ -231,8 +236,9 @@ class Client(tk.Tk):
         self.history.insert("end", "\n")
         self.history.configure(state="disabled")
 
-        await asyncio.gather(*(self.async_send_msg(recipient, file_bytes, {"image": name, "ext": ext, **additional_args}) for recipient in recipients),
-                             loop.run_in_executor(None, self.write_image, name, ext, file_bytes))
+        await asyncio.gather(
+            *(self.async_send_msg(x, file_bytes, {"image": name, "ext": ext, **additional_args}) for x in recipients),
+            loop.run_in_executor(None, self.write_image, name, ext, file_bytes))
 
     def new_gc(self, *args):
         name = simpledialog.askstring("", "Enter chat name", parent=self)
@@ -268,13 +274,12 @@ class Client(tk.Tk):
     def remove_user(self, *args):
         gc = self.group_chats[self.convo.get()]
         x = OptionDialog(self, "", members=gc.members)
-        members = [x.members[i] for i in range(len(x.members)) if x.vars[i].get()]
+        members = [x.members[i] for i in range(len(x.members)) if not x.vars[i].get()]
         
-        for member in members:
-            gc.members.remove(member)
-
         for member in gc.members:
-            self.taskgroup.create_task(self.async_send_msg(member, b"", {"gc": self.convo.get(), "members": gc.members}))
+            self.taskgroup.create_task(self.async_send_msg(member, b"", {"gc": self.convo.get(), "members": members}))
+
+        gc.members = members
 
     def leave_gc(self, *args):
         gc = self.group_chats[self.convo.get()]
@@ -282,6 +287,10 @@ class Client(tk.Tk):
 
         for member in gc.members:
             self.taskgroup.create_task(self.async_send_msg(member, b"", {"gc": self.convo.get(), "members": gc.members}))
+
+        del self.group_chats[self.convo.get()]
+        self.optionmenu["menu"].delete(self.convo.get())
+        self.convo.set("Select Conversation")
     
     # waits for messages to be received
     async def listen(self):
@@ -332,7 +341,7 @@ class Client(tk.Tk):
                     if "gc" in args:
                         is_gc = False
 
-                    self.taskgroup.create_task(self.async_send_msg(contact, message.encode("ascii"), args))
+                    self.taskgroup.create_task(self.async_send_msg(contact, message, args))
 
                 del self.x3dh_requests[contact]
                 
@@ -389,8 +398,11 @@ class Client(tk.Tk):
                         self.history.configure(state="normal")
 
                         if self.identity not in new_set:
-                            self.convo.set("Select Conversation")
                             del self.group_chats[gc]
+                            self.optionmenu["menu"].delete(gc)
+    
+                            if self.convo.get() == gc:
+                                self.convo.set("Select Conversation")
                             continue
 
                         for member in history_set - new_set:
@@ -408,13 +420,13 @@ class Client(tk.Tk):
                 if message:
                     if "image" in header and ".." not in header["image"]:# they sent an image
                         name, ext = header["image"], header["ext"]
-                        print("recieved image in gc")
+                        
                         loop = asyncio.get_event_loop()
                         save = await loop.run_in_executor(None, self.write_image, name, ext, message)
                         self.group_chats[gc].add_received(contact, True, save)
 
+                        # if we received in the conversation currently selected show the image onscreen
                         if self.convo.get() == gc:
-                            print("recieved image in gc")
                             self.history.configure(state="normal")
                             self.history.insert("end", f"{contact} sent: {name}{ext}\n")
                             image = ImageTk.PhotoImage(data=message, format=ext)
@@ -438,6 +450,7 @@ class Client(tk.Tk):
                     save = await loop.run_in_executor(None, self.write_image, name, ext, message)
                     self.message_history[contact].add_received(True, save)
 
+                    # if we received in the conversation currently selected show the image onscreen
                     if self.convo.get() == contact:
                         self.history.configure(state="normal")
                         self.history.insert("end", f"{contact} sent: {name}{ext}\n")
@@ -489,6 +502,14 @@ class Client(tk.Tk):
 
         if convo == "Select Conversation":
             self.history.configure(state="disabled")
+
+            # gc_buttons contains tkinter widgets for buttons that appear when a group chat is selected
+            if self.gc_buttons != []:
+                for button in self.gc_buttons:
+                    button.destroy()
+                
+                self.gc_buttons = []
+            
             return
 
         # self.message_history contains private chats users
@@ -510,18 +531,22 @@ class Client(tk.Tk):
 
             # add messages from the contact they selected
             for message in contact.messages:
-                if message[0]:
-                    self.history.insert("end", f"You sent: {message[2]}\n")
-                else:
-                    self.history.insert("end", f"{contact.name} sent: {message[2]}\n")
-                
                 if message[1]:
+                    if message[0]:
+                        self.history.insert("end", f"You sent: {os.path.basename(message[2])}\n")
+                    else:
+                        self.history.insert("end", f"{contact.name} sent: {os.path.basename(message[2])}\n")
                     data = _images.pop(0)
                     image = ImageTk.PhotoImage(data=data, format=message[2].split(".")[-1])
 
                     images.append(image)
                     self.history.image_create("end", image=image)            
                     self.history.insert("end", "\n")
+                elif message[0]:
+                    self.history.insert("end", f"You sent: {message[2]}\n")
+                else:
+                    self.history.insert("end", f"{contact.name} sent: {message[2]}\n")
+                
         elif convo in self.group_chats:
             # buttons that only appear when a group chat is selected
             # if statement is to avoid having to construct them twice if a group chat is selected twice in a row
@@ -547,15 +572,17 @@ class Client(tk.Tk):
 
             # add messages from the gc they selected
             for message in gc.messages:
-                self.history.insert("end", f"{message[0]} sent: {message[2]}\n")
                 
                 # if the message was an image
                 if message[1]:
+                    self.history.insert("end", f"{message[0]} sent: {os.path.basename(message[2])}\n")
                     data = _images.pop(0)
                     image = ImageTk.PhotoImage(data=data, format=message[2].split(".")[-1])
                     images.append(image)
                     self.history.image_create("end", image=image)            
                     self.history.insert("end", "\n")
+                else:
+                    self.history.insert("end", f"{message[0]} sent: {message[2]}\n")
         
         # prevents the user from being able to edit text in self.history themselves
         self.history.configure(state="disabled")

@@ -28,11 +28,17 @@ async def callback(reader, writer):
         signature = (await reader.readline())[:-1]
         signature = b64decode(signature)
         handshake = json.loads(message.decode("ascii"))
-        _x3dh = handshake["x3dh"]
-        id_key = serialization.load_der_public_key(b64decode(_x3dh["id_key"]))
-        id_key.verify(signature, message, ec.ECDSA(SHA256()))
 
         identity = handshake["identity"]
+        _x3dh = handshake["x3dh"]
+
+        if identity in x3dh:
+            id_key = serialization.load_der_public_key(b64decode(x3dh[identity]["id_key"]))
+            id_key.verify(signature, message, ec.ECDSA(SHA256()))
+        else:
+            id_key = serialization.load_der_public_key(b64decode(_x3dh["id_key"]))
+            id_key.verify(signature, message, ec.ECDSA(SHA256()))
+
         connected[identity] = writer
 
         # saving x3dh keys
@@ -44,9 +50,7 @@ async def callback(reader, writer):
 
         # unsent messages were sent before the client connected
         if identity in unsent:
-            print(unsent[identity])
-            for msg in unsent[identity]:
-                message, ciphertext = msg
+            for message, ciphertext in unsent[identity]:
                 print("writing unsent", message)
                 writer.write(message + ciphertext)
                 await writer.drain()
@@ -113,6 +117,9 @@ async def callback(reader, writer):
             else:
                 unsent[recipient] = [(message, ciphertext)]
     except Exception as e:
+        if identity in connected:
+            del connected[identity]
+        
         print(e)
         writer.close()
         await writer.wait_closed()
